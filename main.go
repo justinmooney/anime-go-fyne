@@ -103,8 +103,8 @@ func downloadAnimes(w fyne.Window) {
 			}(next)
 		}
 	}()
-	
-    go func() {
+
+	go func() {
 		current := 0.0
 		for batch := range animeChan {
 			insertChan <- batch.Data
@@ -114,6 +114,7 @@ func downloadAnimes(w fyne.Window) {
 		}
 	}()
 
+	go func() {
 		defer close(urlChan)
 		page := 0
 		for page <= total {
@@ -123,7 +124,6 @@ func downloadAnimes(w fyne.Window) {
 			urlChan <- next
 		}
 	}()
-
 
 	wg.Wait()
 }
