@@ -21,48 +21,56 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 )
 
+var w fyne.Window
+
 func main() {
 	a := app.New()
-	w := a.NewWindow("Yo Bitch")
+	w = a.NewWindow("Yo Bitch")
 	w.Resize(fyne.NewSize(800, 600))
 	w.SetMaster()
 
-	// var animes []Anime
-	// if databaseExists() {
-	// 	animes = fetchAnimes()
-	// } else {
-	// 	fmt.Println("BUILDING THE DATABASE")
-	// }
-	buildDatabase(w)
-
-	// detailView := widget.NewLabel("empty")
-	// animeList := widget.NewList(
-	// 	func() int { return len(animes) },
-	// 	func() fyne.CanvasObject { return widget.NewLabel("empty") },
-	// 	func(id widget.ListItemID, ob fyne.CanvasObject) {
-	// 		ob.(*widget.Label).SetText(animes[id].title)
-	// 	},
-	// )
-	// animeList.OnSelected = func(id widget.ListItemID) {
-	// 	detailView.SetText(fmt.Sprintf("%s - %s", animes[id].title, animes[id].synopsis))
-	// }
-	// content := container.NewHSplit(animeList, detailView)
-	// content.SetOffset(0.4)
-	//
-	// w.SetContent(content)
-	//
-	// pb := widget.NewProgressBarInfinite()
-	// pblab := widget.NewLabel("Gettin them animes")
-	// w2 := a.NewWindow("Downloading")
-	// w2.SetContent(container.NewStack(pb, pblab))
-	// w2.Show()
+	go runStartup()
 
 	w.ShowAndRun()
 }
 
+type AnimeItem struct {
+	Title    string
+	Synopsis string
+}
+
+func runStartup() {
+	if !databaseExists() {
+		buildDatabase(w)
+	}
+
+	animes := fetchAnimes()
+	detailView := widget.NewLabel("empty")
+	detailView.Wrapping = fyne.TextWrapWord
+	animeList := widget.NewList(
+		func() int { return len(animes) },
+		func() fyne.CanvasObject { return widget.NewLabel("empty") },
+		func(id widget.ListItemID, ob fyne.CanvasObject) {
+			ob.(*widget.Label).SetText(animes[id].Title)
+		},
+	)
+	animeList.OnSelected = func(id widget.ListItemID) {
+		detailView.SetText(fmt.Sprintf("%s - %s", animes[id].Title, animes[id].Synopsis))
+	}
+	content := container.NewHSplit(animeList, detailView)
+	content.SetOffset(0.4)
+
+	w.SetContent(content)
+}
+
 func buildDatabase(w fyne.Window) {
-	button := widget.NewButton("Get Dem Animes", func() { downloadAnimes(w) })
+	waitChan := make(chan int, 1)
+	button := widget.NewButton("Get Dem Animes", func() {
+		downloadAnimes(w)
+		waitChan <- 1
+	})
 	w.SetContent(container.NewCenter(button))
+	<-waitChan
 }
 
 const BASEURL = "https://kitsu.io/api/edge/anime"
@@ -74,7 +82,7 @@ func downloadAnimes(w fyne.Window) {
 	params, _ := url.ParseQuery(lastURL.RawQuery)
 	total, _ := strconv.Atoi(params["page[offset]"][0])
 
-	total = 100 // for testing
+	total = 1000 // for testing
 
 	pbar := widget.NewProgressBar()
 	pbar.Max = float64(total)
@@ -83,11 +91,10 @@ func downloadAnimes(w fyne.Window) {
 
 	animeChan := make(chan AnimeResponse)
 	urlChan := make(chan string)
-	semChan := make(chan int, 16)
+	semChan := make(chan int, 64)
 	createDatabase()
 
-	insertChan := make(chan []Anime)
-	defer close(insertChan)
+	insertChan := make(chan []AnimeRecord)
 	go getInserter(insertChan)
 
 	defer close(animeChan)
@@ -96,6 +103,7 @@ func downloadAnimes(w fyne.Window) {
 
 	go func() {
 		for next := range urlChan {
+			wg.Add(1)
 			semChan <- 1
 			go func(u string) {
 				animeChan <- *doRequest(u)
@@ -105,6 +113,7 @@ func downloadAnimes(w fyne.Window) {
 	}()
 
 	go func() {
+		defer close(insertChan)
 		current := 0.0
 		for batch := range animeChan {
 			insertChan <- batch.Data
@@ -114,21 +123,18 @@ func downloadAnimes(w fyne.Window) {
 		}
 	}()
 
-	go func() {
-		defer close(urlChan)
-		page := 0
-		for page <= total {
-			page += 1
-			wg.Add(1)
-			next := fmt.Sprintf("%s?page[limit]=%d&page[offset]=%d", BASEURL, perPage, page)
-			urlChan <- next
-		}
-	}()
+	defer close(urlChan)
+	page := 0
+	for page <= total {
+		page += 1
+		next := fmt.Sprintf("%s?page[limit]=%d&page[offset]=%d", BASEURL, perPage, page)
+		urlChan <- next
+	}
 
 	wg.Wait()
 }
 
-type Anime struct {
+type AnimeRecord struct {
 	Id         string
 	Attributes struct {
 		Slug           string
@@ -143,7 +149,7 @@ type AnimeResponse struct {
 		Next  string
 		Last  string
 	}
-	Data []Anime
+	Data []AnimeRecord
 }
 
 func doRequest(url string) *AnimeResponse {
@@ -184,7 +190,7 @@ func createDatabase() {
 	}
 }
 
-func getInserter(ch chan []Anime) {
+func getInserter(ch chan []AnimeRecord) {
 	connector, err := duckdb.NewConnector("./test.db", nil)
 	if err != nil {
 		panic(err)
@@ -204,19 +210,21 @@ func getInserter(ch chan []Anime) {
 
 	for batch := range ch {
 		for _, row := range batch {
+			fmt.Println("INSERTING", row.Attributes.CanonicalTitle)
 			err = appender.AppendRow(row.Attributes.CanonicalTitle, row.Attributes.Synopsis)
 			if err != nil {
 				panic(err)
 			}
 		}
+		appender.Flush()
 	}
 
 	appender.Flush()
 	fmt.Println("FLUSHED")
 }
 
-func fetchAnimes() []Anime {
-	animes := make([]Anime, 0)
+func fetchAnimes() []AnimeItem {
+	animes := make([]AnimeItem, 0)
 
 	db, err := sql.Open("duckdb", "test.db")
 	if err != nil {
@@ -231,8 +239,8 @@ func fetchAnimes() []Anime {
 	defer rows.Close()
 
 	for rows.Next() {
-		anime := new(Anime)
-		if err := rows.Scan(&anime.Attributes.CanonicalTitle, &anime.Attributes.Synopsis); err != nil {
+		anime := new(AnimeItem)
+		if err := rows.Scan(&anime.Title, &anime.Synopsis); err != nil {
 			panic(err)
 		}
 		animes = append(animes, *anime)
