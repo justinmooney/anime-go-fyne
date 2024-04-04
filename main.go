@@ -1,14 +1,8 @@
 package main
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"sync"
 
@@ -16,10 +10,9 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
-
-	"github.com/marcboeker/go-duckdb"
-	_ "github.com/marcboeker/go-duckdb"
 )
+
+const BASEURL = "https://kitsu.io/api/edge/anime"
 
 var w fyne.Window
 
@@ -45,8 +38,8 @@ func runStartup() {
 	}
 
 	animes := fetchAnimes()
-	detailView := widget.NewLabel("empty")
-	detailView.Wrapping = fyne.TextWrapWord
+
+	// left pane
 	animeList := widget.NewList(
 		func() int { return len(animes) },
 		func() fyne.CanvasObject { return widget.NewLabel("empty") },
@@ -54,10 +47,29 @@ func runStartup() {
 			ob.(*widget.Label).SetText(animes[id].Title)
 		},
 	)
+
+	// right pane
+	// detailTitle := widget.NewLabelWithStyle("empty", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+
+	detailView := widget.NewLabel("empty")
+	detailView.Wrapping = fyne.TextWrapWord
+
+	detailContainer := container.NewStack()
+
 	animeList.OnSelected = func(id widget.ListItemID) {
-		detailView.SetText(fmt.Sprintf("%s - %s", animes[id].Title, animes[id].Synopsis))
+		detailContainer.RemoveAll()
+		anime := &animes[id]
+		// detailTitle := widget.NewRichTextWithText(anime.Title)
+		//       detailTitle.TextStyle = fyne.TextStyle{Bold: true}
+		//       detailTitle.Text
+		// detailView.SetText(fmt.Sprintf(animes[id].Synopsis))
+		// rightPanel := container.NewVBox(detailTitle, detailView)
+		textBox := widget.NewRichTextFromMarkdown(fmt.Sprintf("# %s \n---\n %s", anime.Title, anime.Synopsis))
+		textBox.Wrapping = fyne.TextWrapWord
+		detailContainer.Add(textBox)
 	}
-	content := container.NewHSplit(animeList, detailView)
+
+	content := container.NewHSplit(animeList, detailContainer)
 	content.SetOffset(0.4)
 
 	w.SetContent(content)
@@ -73,8 +85,6 @@ func buildDatabase(w fyne.Window) {
 	<-waitChan
 }
 
-const BASEURL = "https://kitsu.io/api/edge/anime"
-
 func downloadAnimes(w fyne.Window) {
 	perPage := 10
 	info := doRequest(fmt.Sprintf("%s?page[limit]=%d", BASEURL, perPage))
@@ -82,7 +92,7 @@ func downloadAnimes(w fyne.Window) {
 	params, _ := url.ParseQuery(lastURL.RawQuery)
 	total, _ := strconv.Atoi(params["page[offset]"][0])
 
-	total = 1000 // for testing
+	total = 100 // for testing
 
 	pbar := widget.NewProgressBar()
 	pbar.Max = float64(total)
@@ -126,125 +136,11 @@ func downloadAnimes(w fyne.Window) {
 	defer close(urlChan)
 	page := 0
 	for page <= total {
-		page += 1
-		next := fmt.Sprintf("%s?page[limit]=%d&page[offset]=%d", BASEURL, perPage, page)
+		next := fmt.Sprintf("%s?page[limit]=%d&page[offset]=%d", BASEURL, perPage, page*perPage)
+		fmt.Println(next)
 		urlChan <- next
+		page += 1
 	}
 
 	wg.Wait()
-}
-
-type AnimeRecord struct {
-	Id         string
-	Attributes struct {
-		Slug           string
-		CanonicalTitle string
-		Synopsis       string
-	}
-}
-
-type AnimeResponse struct {
-	Links struct {
-		First string
-		Next  string
-		Last  string
-	}
-	Data []AnimeRecord
-}
-
-func doRequest(url string) *AnimeResponse {
-	resp, err := http.Get(url)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	ar := new(AnimeResponse)
-	if err := json.NewDecoder(resp.Body).Decode(ar); err != nil {
-		panic(err)
-	}
-
-	return ar
-}
-
-func databaseExists() bool {
-	_, err := os.Stat("./test.db")
-	return !errors.Is(err, os.ErrNotExist)
-}
-
-func createDatabase() {
-	db, err := sql.Open("duckdb", "./test.db")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	_, err = db.Exec(`
-        CREATE TABLE animes (
-            title VARCHAR,
-            synopsis VARCHAR
-        )
-    `)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func getInserter(ch chan []AnimeRecord) {
-	connector, err := duckdb.NewConnector("./test.db", nil)
-	if err != nil {
-		panic(err)
-	}
-	defer connector.Close()
-
-	conn, err := connector.Connect(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
-	appender, err := duckdb.NewAppenderFromConn(conn, "", "animes")
-	if err != nil {
-		panic(err)
-	}
-	defer appender.Close()
-
-	for batch := range ch {
-		for _, row := range batch {
-			fmt.Println("INSERTING", row.Attributes.CanonicalTitle)
-			err = appender.AppendRow(row.Attributes.CanonicalTitle, row.Attributes.Synopsis)
-			if err != nil {
-				panic(err)
-			}
-		}
-		appender.Flush()
-	}
-
-	appender.Flush()
-	fmt.Println("FLUSHED")
-}
-
-func fetchAnimes() []AnimeItem {
-	animes := make([]AnimeItem, 0)
-
-	db, err := sql.Open("duckdb", "test.db")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	rows, err := db.Query(`SELECT * FROM animes`)
-	if err != nil {
-		panic(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		anime := new(AnimeItem)
-		if err := rows.Scan(&anime.Title, &anime.Synopsis); err != nil {
-			panic(err)
-		}
-		animes = append(animes, *anime)
-	}
-
-	return animes
 }
