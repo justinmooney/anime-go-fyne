@@ -10,9 +10,10 @@ import (
 type AnimeRecord struct {
 	Id         string
 	Attributes struct {
-		Slug           string
 		CanonicalTitle string
 		Synopsis       string
+		StartDate      string
+		EndDate        string
 	}
 }
 

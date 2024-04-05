@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -19,7 +21,8 @@ var w fyne.Window
 func main() {
 	a := app.New()
 	w = a.NewWindow("Yo Bitch")
-	w.Resize(fyne.NewSize(800, 600))
+	w.Resize(fyne.NewSize(1400, 800))
+	w.SetFixedSize(true)
 	w.SetMaster()
 
 	go runStartup()
@@ -28,8 +31,10 @@ func main() {
 }
 
 type AnimeItem struct {
-	Title    string
-	Synopsis string
+	Title     string
+	Synopsis  string
+	StartDate string
+	EndDate   string
 }
 
 func runStartup() {
@@ -48,31 +53,56 @@ func runStartup() {
 		},
 	)
 
-	// right pane
-	// detailTitle := widget.NewLabelWithStyle("empty", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	detailContainer := container.NewStack()
 
 	detailView := widget.NewLabel("empty")
 	detailView.Wrapping = fyne.TextWrapWord
 
-	detailContainer := container.NewStack()
-
 	animeList.OnSelected = func(id widget.ListItemID) {
 		detailContainer.RemoveAll()
 		anime := &animes[id]
-		// detailTitle := widget.NewRichTextWithText(anime.Title)
-		//       detailTitle.TextStyle = fyne.TextStyle{Bold: true}
-		//       detailTitle.Text
-		// detailView.SetText(fmt.Sprintf(animes[id].Synopsis))
-		// rightPanel := container.NewVBox(detailTitle, detailView)
-		textBox := widget.NewRichTextFromMarkdown(fmt.Sprintf("# %s \n---\n %s", anime.Title, anime.Synopsis))
+		md := "# %s (%s)\n---\n %s"
+		text := fmt.Sprintf(md, anime.Title, dateString(anime.StartDate, anime.EndDate), anime.Synopsis)
+		textBox := widget.NewRichTextFromMarkdown(text)
 		textBox.Wrapping = fyne.TextWrapWord
 		detailContainer.Add(textBox)
 	}
 
-	content := container.NewHSplit(animeList, detailContainer)
-	content.SetOffset(0.4)
+	searcher := widget.NewEntry()
+	searcher.PlaceHolder = "search"
+	searcher.OnChanged = func(s string) {
+		for i, a := range animes {
+			if strings.Contains(strings.ToLower(a.Title), strings.ToLower(s)) {
+				animeList.ScrollTo(i)
+				animeList.Select(i)
+				return
+			}
+		}
+		animeList.ScrollToTop()
+	}
+
+	listContainer := container.NewBorder(searcher, nil, nil, nil, animeList)
+
+	content := container.NewHSplit(listContainer, detailContainer)
+	content.SetOffset(0.3)
+
+	animeList.Select(rand.IntN(len(animes)))
+	animeList.ScrollToTop()
 
 	w.SetContent(content)
+}
+
+func dateString(start, end string) string {
+	if end == "" || start == end {
+		year := strings.Split(start, "-")[0]
+		return year
+	}
+	startYear := strings.Split(start, "-")[0]
+	endYear := strings.Split(end, "-")[0]
+	if startYear == endYear {
+		return startYear
+	}
+	return fmt.Sprintf("%s-%s", startYear, endYear)
 }
 
 func buildDatabase(w fyne.Window) {
@@ -96,7 +126,7 @@ func downloadAnimes(w fyne.Window) {
 
 	pbar := widget.NewProgressBar()
 	pbar.Max = float64(total)
-	text := widget.NewLabel("Downloading dem animes")
+	text := widget.NewLabel("Gettin dem animes")
 	w.SetContent(container.NewCenter(container.NewVBox(text, pbar)))
 
 	animeChan := make(chan AnimeResponse)

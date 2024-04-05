@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/marcboeker/go-duckdb"
 	// _ "github.com/marcboeker/go-duckdb"
@@ -29,8 +30,11 @@ func createDatabase() {
 
 	_, err = db.Exec(`
         CREATE TABLE animes (
+            id UBIGINT, 
             title VARCHAR,
-            synopsis VARCHAR
+            synopsis VARCHAR,
+            start_date VARCHAR,
+            end_date VARCHAR
         )
     `)
 	if err != nil {
@@ -58,9 +62,17 @@ func getInserter(ch chan []AnimeRecord) {
 
 	for batch := range ch {
 		for _, row := range batch {
-			// fmt.Println("INSERTING", row.Attributes.CanonicalTitle)
-			err = appender.AppendRow(row.Attributes.CanonicalTitle, row.Attributes.Synopsis)
+			id, _ := strconv.ParseUint(row.Id, 10, 64)
+			attrs := row.Attributes
+			err = appender.AppendRow(
+				id,
+				attrs.CanonicalTitle,
+				attrs.Synopsis,
+				attrs.StartDate,
+				attrs.EndDate,
+			)
 			if err != nil {
+				println("ITS ME")
 				panic(err)
 			}
 		}
@@ -68,7 +80,6 @@ func getInserter(ch chan []AnimeRecord) {
 	}
 
 	appender.Flush()
-	fmt.Println("FLUSHED")
 }
 
 func fetchAnimes() []AnimeItem {
@@ -80,7 +91,13 @@ func fetchAnimes() []AnimeItem {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(fmt.Sprintf(`SELECT * FROM %s ORDER BY Title`, TABLE))
+	sql := `
+    SELECT title, synopsis, start_date, end_date
+    FROM %s
+    ORDER BY title
+    `
+
+	rows, err := db.Query(fmt.Sprintf(sql, TABLE))
 	if err != nil {
 		panic(err)
 	}
@@ -88,7 +105,12 @@ func fetchAnimes() []AnimeItem {
 
 	for rows.Next() {
 		anime := new(AnimeItem)
-		if err := rows.Scan(&anime.Title, &anime.Synopsis); err != nil {
+		if err := rows.Scan(
+			&anime.Title,
+			&anime.Synopsis,
+			&anime.StartDate,
+			&anime.EndDate,
+		); err != nil {
 			panic(err)
 		}
 		animes = append(animes, *anime)
