@@ -3,10 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand/v2"
-	"net/url"
-	"strconv"
 	"strings"
-	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -24,9 +21,7 @@ func main() {
 	w.Resize(fyne.NewSize(1400, 800))
 	w.SetFixedSize(true)
 	w.SetMaster()
-
 	go runStartup()
-
 	w.ShowAndRun()
 }
 
@@ -90,6 +85,7 @@ func runStartup() {
 	animeList.ScrollToTop()
 
 	w.SetContent(content)
+	w.Resize(fyne.NewSize(1400, 800))
 }
 
 func dateString(start, end string) string {
@@ -108,69 +104,25 @@ func dateString(start, end string) string {
 func buildDatabase(w fyne.Window) {
 	waitChan := make(chan int, 1)
 	button := widget.NewButton("Get Dem Animes", func() {
-		downloadAnimes(w)
+		downloadPage(w)
 		waitChan <- 1
 	})
 	w.SetContent(container.NewCenter(button))
 	<-waitChan
 }
 
-func downloadAnimes(w fyne.Window) {
-	perPage := 10
-	info := doRequest(fmt.Sprintf("%s?page[limit]=%d", BASEURL, perPage))
-	lastURL, _ := url.Parse(info.Links.Last)
-	params, _ := url.ParseQuery(lastURL.RawQuery)
-	total, _ := strconv.Atoi(params["page[offset]"][0])
-
-	total = 100 // for testing
-
-	pbar := widget.NewProgressBar()
-	pbar.Max = float64(total)
+func downloadPage(w fyne.Window) {
 	text := widget.NewLabel("Gettin dem animes")
+	pbar := widget.NewProgressBar()
 	w.SetContent(container.NewCenter(container.NewVBox(text, pbar)))
 
-	animeChan := make(chan AnimeResponse)
-	urlChan := make(chan string)
-	semChan := make(chan int, 64)
-	createDatabase()
+	dl := NewDownloader(10)
+	pbar.Max = float64(dl.TotalPages)
+	go dl.Download()
 
-	insertChan := make(chan []AnimeRecord)
-	go getInserter(insertChan)
-
-	defer close(animeChan)
-
-	var wg sync.WaitGroup
-
-	go func() {
-		for next := range urlChan {
-			wg.Add(1)
-			semChan <- 1
-			go func(u string) {
-				animeChan <- *doRequest(u)
-				<-semChan
-			}(next)
-		}
-	}()
-
-	go func() {
-		defer close(insertChan)
-		current := 0.0
-		for batch := range animeChan {
-			insertChan <- batch.Data
-			current += 1.0
-			pbar.SetValue(current)
-			wg.Done()
-		}
-	}()
-
-	defer close(urlChan)
-	page := 0
-	for page <= total {
-		next := fmt.Sprintf("%s?page[limit]=%d&page[offset]=%d", BASEURL, perPage, page*perPage)
-		fmt.Println(next)
-		urlChan <- next
-		page += 1
+	progress := 0
+	for p := range dl.Progress {
+		progress += p
+		pbar.SetValue(float64(progress))
 	}
-
-	wg.Wait()
 }

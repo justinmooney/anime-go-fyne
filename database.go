@@ -42,7 +42,9 @@ func createDatabase() {
 	}
 }
 
-func getInserter(ch chan []AnimeRecord) {
+func NewInserter() chan []AnimeRecord {
+	createDatabase()
+
 	connector, err := duckdb.NewConnector(DBFILE, nil)
 	if err != nil {
 		panic(err)
@@ -58,27 +60,34 @@ func getInserter(ch chan []AnimeRecord) {
 	if err != nil {
 		panic(err)
 	}
-	defer appender.Close()
 
-	for batch := range ch {
-		for _, row := range batch {
-			id, _ := strconv.ParseUint(row.Id, 10, 64)
-			attrs := row.Attributes
-			err = appender.AppendRow(
-				id,
-				attrs.CanonicalTitle,
-				attrs.Synopsis,
-				attrs.StartDate,
-				attrs.EndDate,
-			)
-			if err != nil {
-				println("ITS ME")
-				panic(err)
-			}
+	ch := make(chan []AnimeRecord)
+
+	go func() {
+		defer appender.Close()
+		for batch := range ch {
+			insertBatch(appender, &batch)
 		}
-		appender.Flush()
-	}
+	}()
 
+	return ch
+}
+
+func insertBatch(appender *duckdb.Appender, batch *[]AnimeRecord) {
+	for _, row := range *batch {
+		id, _ := strconv.ParseUint(row.Id, 10, 64)
+		attrs := row.Attributes
+		err := appender.AppendRow(
+			id,
+			attrs.CanonicalTitle,
+			attrs.Synopsis,
+			attrs.StartDate,
+			attrs.EndDate,
+		)
+		if err != nil {
+			panic(err)
+		}
+	}
 	appender.Flush()
 }
 
