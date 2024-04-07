@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"math/rand/v2"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -19,7 +22,7 @@ var w fyne.Window
 func main() {
 	a := app.New()
 	w = a.NewWindow("Yo Bitch")
-	w.Resize(fyne.NewSize(1400, 800))
+	w.Resize(fyne.NewSize(1400, 1000))
 	a.Settings().SetTheme(theme.DarkTheme())
 	w.SetMaster()
 	go runStartup()
@@ -27,10 +30,11 @@ func main() {
 }
 
 type AnimeItem struct {
-	Title     string
-	Synopsis  string
-	StartDate string
-	EndDate   string
+	Title      string
+	Synopsis   string
+	StartDate  string
+	EndDate    string
+	CoverImage string
 }
 
 func runStartup() {
@@ -53,11 +57,20 @@ func runStartup() {
 	textBox := widget.NewRichText()
 	textBox.Wrapping = fyne.TextWrapWord
 
+	imageView := container.NewStack(canvas.NewRectangle(color.Black))
+
 	animeList.OnSelected = func(id widget.ListItemID) {
 		anime := &animes[id]
 		md := "# %s (%s)\n---\n %s"
 		text := fmt.Sprintf(md, anime.Title, dateString(anime.StartDate, anime.EndDate), anime.Synopsis)
 		textBox.ParseMarkdown(text)
+		imageView.RemoveAll()
+		uri, err := storage.ParseURI(anime.CoverImage)
+		if err == nil {
+			image := canvas.NewImageFromURI(uri)
+			image.FillMode = canvas.ImageFillContain
+			imageView.Add(image)
+		}
 	}
 
 	searcher := widget.NewEntry()
@@ -76,8 +89,8 @@ func runStartup() {
 	animeList.Select(rand.IntN(len(animes)))
 	animeList.ScrollToTop()
 
-	layout := newLayout(searcher, animeList, textBox)
-	content := container.New(layout, searcher, animeList, textBox)
+	layout := newLayout(searcher, animeList, textBox, imageView)
+	content := container.New(layout, searcher, animeList, textBox, imageView)
 	w.SetContent(content)
 }
 

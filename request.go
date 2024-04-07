@@ -14,6 +14,9 @@ type AnimeRecord struct {
 		Synopsis       string
 		StartDate      string
 		EndDate        string
+		CoverImage     struct {
+			Original string
+		}
 	}
 }
 

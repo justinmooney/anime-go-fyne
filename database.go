@@ -34,7 +34,8 @@ func createDatabase() {
             title VARCHAR,
             synopsis VARCHAR,
             start_date VARCHAR,
-            end_date VARCHAR
+            end_date VARCHAR,
+            cover_image VARCHAR
         )
     `)
 	if err != nil {
@@ -83,6 +84,7 @@ func insertBatch(appender *duckdb.Appender, batch *[]AnimeRecord) {
 			attrs.Synopsis,
 			attrs.StartDate,
 			attrs.EndDate,
+			attrs.CoverImage.Original,
 		)
 		if err != nil {
 			panic(err)
@@ -101,7 +103,7 @@ func fetchAnimes() []AnimeItem {
 	defer db.Close()
 
 	sql := `
-    SELECT title, synopsis, start_date, end_date
+    SELECT title, synopsis, start_date, end_date, cover_image
     FROM %s
     ORDER BY title
     `
@@ -119,6 +121,7 @@ func fetchAnimes() []AnimeItem {
 			&anime.Synopsis,
 			&anime.StartDate,
 			&anime.EndDate,
+			&anime.CoverImage,
 		); err != nil {
 			panic(err)
 		}
