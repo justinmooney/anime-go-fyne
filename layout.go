@@ -33,5 +33,5 @@ func (l *myLayout) Layout(_ []fyne.CanvasObject, size fyne.Size) {
 }
 
 func (l *myLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	return fyne.NewSize(1400, 900)
+	return fyne.NewSize(1400, 1000)
 }
