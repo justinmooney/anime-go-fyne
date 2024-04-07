@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -19,7 +20,7 @@ func main() {
 	a := app.New()
 	w = a.NewWindow("Yo Bitch")
 	w.Resize(fyne.NewSize(1400, 800))
-	w.SetFixedSize(true)
+	a.Settings().SetTheme(theme.DarkTheme())
 	w.SetMaster()
 	go runStartup()
 	w.ShowAndRun()
@@ -48,19 +49,15 @@ func runStartup() {
 		},
 	)
 
-	detailContainer := container.NewStack()
-
-	detailView := widget.NewLabel("empty")
-	detailView.Wrapping = fyne.TextWrapWord
+	// right pane
+	textBox := widget.NewRichText()
+	textBox.Wrapping = fyne.TextWrapWord
 
 	animeList.OnSelected = func(id widget.ListItemID) {
-		detailContainer.RemoveAll()
 		anime := &animes[id]
 		md := "# %s (%s)\n---\n %s"
 		text := fmt.Sprintf(md, anime.Title, dateString(anime.StartDate, anime.EndDate), anime.Synopsis)
-		textBox := widget.NewRichTextFromMarkdown(text)
-		textBox.Wrapping = fyne.TextWrapWord
-		detailContainer.Add(textBox)
+		textBox.ParseMarkdown(text)
 	}
 
 	searcher := widget.NewEntry()
@@ -76,16 +73,12 @@ func runStartup() {
 		animeList.ScrollToTop()
 	}
 
-	listContainer := container.NewBorder(searcher, nil, nil, nil, animeList)
-
-	content := container.NewHSplit(listContainer, detailContainer)
-	content.SetOffset(0.3)
-
 	animeList.Select(rand.IntN(len(animes)))
 	animeList.ScrollToTop()
 
+	layout := newLayout(searcher, animeList, textBox)
+	content := container.New(layout, searcher, animeList, textBox)
 	w.SetContent(content)
-	w.Resize(fyne.NewSize(1400, 800))
 }
 
 func dateString(start, end string) string {
